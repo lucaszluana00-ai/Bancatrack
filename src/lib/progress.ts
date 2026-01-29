@@ -1,11 +1,7 @@
 "use client";
 
-import { doc, setDoc, type Firestore } from 'firebase/firestore';
-import { useUser, useFirestore, useDoc } from '@/firebase';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { allSubjects } from './data';
-import { useMemo } from 'react';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 
 export type VideoProgress = {
   progress: number;
@@ -14,7 +10,7 @@ export type VideoProgress = {
 
 export type SubjectProgress = {
   videos: {
-    [videoId: string]: VideoProgress;
+    [videoId:string]: VideoProgress;
   };
   summary?: string;
 };
@@ -31,107 +27,56 @@ const getInitialProgress = (): UserProgress => {
     return initialProgress;
 };
 
+const PROGRESS_STORAGE_KEY = 'bancaTrackUserProgress';
+
 export const useUserProgress = () => {
-    const { user, loading: userLoading } = useUser();
-    const db = useFirestore();
+    const [progress, setProgress] = useState<UserProgress | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    const progressRef = useMemo(() => {
-        if (!db || !user) return null;
-        return doc(db, `users/${user.uid}/progress`, 'main');
-    }, [db, user]);
-
-    const { data: progressData, loading: progressLoading } = useDoc<UserProgress>(progressRef);
-
-    const progress = useMemo(() => {
-        const baseProgress = getInitialProgress();
-        if (!progressData) {
-            return baseProgress;
-        }
-        
-        const merged = { ...baseProgress };
-        for (const subjectId in progressData) {
-            if (Object.prototype.hasOwnProperty.call(progressData, subjectId) && merged[subjectId]) {
-                merged[subjectId] = {
-                    ...merged[subjectId],
-                    ...progressData[subjectId]
-                };
+    useEffect(() => {
+        // This effect runs only on the client
+        setLoading(true);
+        try {
+            const savedProgressRaw = localStorage.getItem(PROGRESS_STORAGE_KEY);
+            const baseProgress = getInitialProgress();
+            
+            if (savedProgressRaw) {
+                const savedProgress = JSON.parse(savedProgressRaw);
+                // Merge saved progress with the base structure to account for new subjects
+                const merged = { ...baseProgress };
+                for (const subjectId in baseProgress) {
+                    if (savedProgress[subjectId]) {
+                         merged[subjectId] = {
+                           ...baseProgress[subjectId],
+                           ...savedProgress[subjectId],
+                           videos: {
+                             ...baseProgress[subjectId].videos,
+                             ...(savedProgress[subjectId].videos || {})
+                           }
+                         };
+                    }
+                }
+                setProgress(merged);
+            } else {
+                setProgress(baseProgress);
             }
+        } catch (error) {
+            console.error("Failed to load progress from localStorage", error);
+            setProgress(getInitialProgress());
+        } finally {
+            setLoading(false);
         }
-        
-        allSubjects.forEach(subject => {
-            if (merged[subject.id] && typeof merged[subject.id].summary === 'undefined') {
-                merged[subject.id].summary = '';
-            }
-        });
+    }, []);
 
-        return merged;
-    }, [progressData]);
-    
-    const loading = userLoading || (!!user && progressLoading);
+    const updateProgress = useCallback((newProgress: UserProgress) => {
+        try {
+            const newProgressJSON = JSON.stringify(newProgress);
+            localStorage.setItem(PROGRESS_STORAGE_KEY, newProgressJSON);
+            setProgress(newProgress);
+        } catch (error) {
+            console.error("Failed to save progress to localStorage", error);
+        }
+    }, []);
 
-    return { progress, loading, user, db };
+    return { progress, loading, updateProgress };
 };
-
-export function updateVideoProgress(
-  db: Firestore,
-  userId: string,
-  subjectId: string,
-  videoId: string,
-  progress: number,
-  currentProgress: UserProgress | null
-) {
-  if (!currentProgress) return;
-  const docRef = doc(db, `users/${userId}/progress/main`);
-  
-  const newProgress = JSON.parse(JSON.stringify(currentProgress));
-
-  if (!newProgress[subjectId]) {
-      newProgress[subjectId] = { videos: {}, summary: '' };
-  }
-  if (!newProgress[subjectId].videos) {
-      newProgress[subjectId].videos = {};
-  }
-
-  newProgress[subjectId].videos[videoId] = {
-      progress: progress,
-      completed: progress >= 90
-  };
-  
-  setDoc(docRef, newProgress).catch((serverError) => {
-    const permissionError = new FirestorePermissionError({
-      path: docRef.path,
-      operation: 'write',
-      requestResourceData: newProgress,
-    });
-    errorEmitter.emit('permission-error', permissionError);
-  });
-}
-
-export function updateSubjectSummary(
-    db: Firestore,
-    userId: string,
-    subjectId: string,
-    summary: string,
-    currentProgress: UserProgress | null
-) {
-    if (!currentProgress) return;
-    const docRef = doc(db, `users/${userId}/progress/main`);
-    
-    const newProgress = JSON.parse(JSON.stringify(currentProgress));
-
-    if (!newProgress[subjectId]) {
-        newProgress[subjectId] = { videos: {}, summary: '' };
-    }
-    
-    newProgress[subjectId].summary = summary;
-
-    setDoc(docRef, newProgress).catch((serverError) => {
-        const permissionError = new FirestorePermissionError({
-          path: docRef.path,
-          operation: 'write',
-          requestResourceData: newProgress,
-        });
-        errorEmitter.emit('permission-error', permissionError);
-    });
-}
-

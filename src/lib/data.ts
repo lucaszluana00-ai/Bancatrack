@@ -137,6 +137,12 @@ export const allSubjects: Subject[] = [
     ],
   },
   {
+    id: 'probabilidade-e-estatistica',
+    name: 'Probabilidade e Estatística',
+    Icon: Sigma,
+    videos: [],
+  },
+  {
     id: 'vendas-e-negociacao',
     name: 'Vendas e Negociação',
     Icon: Handshake,

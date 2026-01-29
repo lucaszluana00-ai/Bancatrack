@@ -1,7 +1,7 @@
 "use client";
 
-import { useParams, useRouter } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { useParams } from 'next/navigation';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSubjectById } from '@/lib/data';
 import YouTubePlayer from '@/components/video/YouTubePlayer';
 import {
@@ -13,90 +13,100 @@ import {
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useUserProgress, updateVideoProgress, updateSubjectSummary, type VideoProgress } from '@/lib/progress';
+import { useUserProgress, type UserProgress, type VideoProgress } from '@/lib/progress';
 import { debounce } from '@/lib/utils';
 import { CheckCircle2 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 
 export default function SubjectPage() {
   const params = useParams();
-  const router = useRouter();
   const slug = params.slug as string;
   const subject = getSubjectById(slug);
   const [activeVideo, setActiveVideo] = useState(subject?.videos[0]?.id);
 
-  const { progress: userProgress, loading, user, db } = useUserProgress();
-  const progressRef = useRef(userProgress);
-
-  useEffect(() => {
-    progressRef.current = userProgress;
-  }, [userProgress]);
-
-  const [localProgress, setLocalProgress] = useState<Record<string, VideoProgress>>({});
+  const { progress: userProgress, loading, updateProgress } = useUserProgress();
+  
+  const [localVideoProgress, setLocalVideoProgress] = useState<Record<string, VideoProgress>>({});
   const [summary, setSummary] = useState('');
 
   useEffect(() => {
-    if (!loading && !user) {
-        router.push('/login');
-    }
-  }, [user, loading, router]);
-
-  useEffect(() => {
     if (userProgress && subject) {
-      setLocalProgress(userProgress[subject.id]?.videos || {});
+      setLocalVideoProgress(userProgress[subject.id]?.videos || {});
       setSummary(userProgress[subject.id]?.summary || '');
     }
   }, [userProgress, subject]);
   
-  const debouncedUpdate = useCallback(
-    debounce((subjectId: string, videoId: string, videoProgress: number) => {
-      if (db && user) {
-          updateVideoProgress(db, user.uid, subjectId, videoId, videoProgress, progressRef.current);
-      }
-    }, 2000),
-    [db, user]
-  );
-
-  const debouncedSummaryUpdate = useCallback(
-    debounce((subjectId: string, newSummary: string) => {
-        if (db && user) {
-            updateSubjectSummary(db, user.uid, subjectId, newSummary, progressRef.current);
+  const debouncedUpdateProgress = useCallback(
+    debounce((newProgressData: UserProgress) => {
+        if(updateProgress) {
+            updateProgress(newProgressData);
         }
     }, 1000),
-    [db, user]
+    [updateProgress]
   );
 
-  const handleProgressUpdate = useCallback((videoId: string, newProgress: number) => {
-    if (!subject) return;
+  const handleProgressUpdate = useCallback((videoId: string, newProgressValue: number) => {
+    if (!subject || !userProgress) return;
     
-    setLocalProgress(prev => ({
+    // Update local state for immediate UI feedback
+    setLocalVideoProgress(prev => ({
       ...prev,
-      [videoId]: { progress: newProgress, completed: newProgress >= 90 }
+      [videoId]: { progress: newProgressValue, completed: newProgressValue >= 90 }
     }));
-    debouncedUpdate(subject.id, videoId, newProgress);
-  }, [subject, debouncedUpdate]);
+
+    // Create the new full progress object to be saved
+    const newFullProgress = JSON.parse(JSON.stringify(userProgress));
+    if (!newFullProgress[subject.id]) {
+      newFullProgress[subject.id] = { videos: {}, summary: '' };
+    }
+     if (!newFullProgress[subject.id].videos) {
+      newFullProgress[subject.id].videos = {};
+    }
+    newFullProgress[subject.id].videos[videoId] = {
+      progress: newProgressValue,
+      completed: newProgressValue >= 90
+    };
+    
+    debouncedUpdateProgress(newFullProgress);
+
+  }, [subject, userProgress, debouncedUpdateProgress]);
   
   const handleSummaryChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (!subject) return;
+    if (!subject || !userProgress) return;
     const newSummary = e.target.value;
+    
+    // Update local state for immediate UI feedback
     setSummary(newSummary);
-    debouncedSummaryUpdate(subject.id, newSummary);
+
+    // Create the new full progress object to be saved
+    const newFullProgress = JSON.parse(JSON.stringify(userProgress));
+    if (!newFullProgress[subject.id]) {
+      newFullProgress[subject.id] = { videos: {}, summary: '' };
+    }
+    newFullProgress[subject.id].summary = newSummary;
+
+    debouncedUpdateProgress(newFullProgress);
   };
 
   const subjectOverallProgress = useMemo(() => {
-    if (!subject || Object.keys(localProgress).length === 0) return 0;
+    if (!subject || !userProgress) return 0;
+
+    const subjectProgress = userProgress[subject.id];
+    if (!subjectProgress || subject.videos.length === 0) return 0;
+    
     const totalProgress = subject.videos.reduce((acc, video) => {
-      return acc + (localProgress[video.id]?.progress || 0);
+      return acc + (subjectProgress.videos[video.id]?.progress || 0);
     }, 0);
+
     return Math.round(totalProgress / subject.videos.length);
-  }, [localProgress, subject]);
+  }, [userProgress, subject]);
 
 
   if (!subject) {
     return <div>Matéria não encontrada.</div>;
   }
 
-  if (loading || !user) {
+  if (loading || !userProgress) {
     return (
         <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8 space-y-6">
             <Skeleton className="h-24 w-full" />
@@ -108,6 +118,8 @@ export default function SubjectPage() {
         </div>
     )
   }
+  
+  const videoProgressForUI = (videoId: string) => localVideoProgress[videoId] || { progress: 0, completed: false };
 
   return (
     <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8">
@@ -134,7 +146,7 @@ export default function SubjectPage() {
         onValueChange={(value) => setActiveVideo(value)}
       >
         {subject.videos.map((video) => {
-          const videoProgress = localProgress[video.id] || { progress: 0, completed: false };
+          const videoProgress = videoProgressForUI(video.id);
           const isActive = activeVideo === video.id;
           return (
             <AccordionItem value={video.id} key={video.id} className="border-b-0">
@@ -189,4 +201,3 @@ export default function SubjectPage() {
     </div>
   );
 }
-

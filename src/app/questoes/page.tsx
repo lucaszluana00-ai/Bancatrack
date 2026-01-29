@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Table,
   TableBody,
@@ -34,16 +33,9 @@ const StatusDisplay: React.FC<{ status: QuestionProgressStatus }> = ({ status })
 };
 
 export default function QuestoesPage() {
-  const { progress, loading, updateQuestionProgress, user } = useQuestionProgress();
+  const { progress, loading, updateQuestionProgress } = useQuestionProgress();
   const [localProgress, setLocalProgress] = useState<AllQuestionProgress | null>(null);
-  const router = useRouter();
   
-  useEffect(() => {
-    if (!loading && !user) {
-        router.push('/login');
-    }
-  }, [user, loading, router]);
-
   useEffect(() => {
     if (progress) {
       setLocalProgress(progress);
@@ -51,7 +43,9 @@ export default function QuestoesPage() {
   }, [progress]);
   
   const debouncedUpdate = useCallback(debounce((newProgress: AllQuestionProgress) => {
-    updateQuestionProgress(newProgress);
+    if (updateQuestionProgress) {
+        updateQuestionProgress(newProgress);
+    }
   }, 500), [updateQuestionProgress]);
 
   const handleChange = (subjectId: string, field: string, value: any) => {
@@ -77,10 +71,12 @@ export default function QuestoesPage() {
       },
     };
     setLocalProgress(newProgress);
-    updateQuestionProgress(newProgress);
+    if (updateQuestionProgress) {
+        updateQuestionProgress(newProgress);
+    }
   };
 
-  if (loading || !user || !localProgress) {
+  if (loading || !localProgress) {
     return (
       <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8">
         <Card>
@@ -168,7 +164,7 @@ export default function QuestoesPage() {
                     <TableCell>
                       <Input
                         type="number"
-                        value={localProgress[subject.id]?.questionsDone}
+                        value={localProgress[subject.id]?.questionsDone || ''}
                         onChange={(e) => handleChange(subject.id, 'questionsDone', e.target.value)}
                         className="w-24"
                         placeholder="0"
@@ -178,7 +174,7 @@ export default function QuestoesPage() {
                       <div className="flex items-center">
                         <Input
                           type="number"
-                          value={localProgress[subject.id]?.accuracy}
+                          value={localProgress[subject.id]?.accuracy || ''}
                           onChange={(e) => handleChange(subject.id, 'accuracy', e.target.value)}
                           className="w-24"
                           placeholder="0"
@@ -188,7 +184,7 @@ export default function QuestoesPage() {
                     </TableCell>
                     <TableCell>
                       <Textarea
-                        value={localProgress[subject.id]?.observations}
+                        value={localProgress[subject.id]?.observations || ''}
                         onChange={(e) => handleChange(subject.id, 'observations', e.target.value)}
                         placeholder="Erros recorrentes, pegadinhas..."
                         className="min-h-[60px]"
@@ -204,4 +200,3 @@ export default function QuestoesPage() {
     </div>
   );
 }
-

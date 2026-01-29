@@ -1,11 +1,7 @@
 "use client";
 
-import { useMemo } from 'react';
-import { doc, setDoc, type Firestore } from 'firebase/firestore';
+import { useState, useEffect, useCallback } from 'react';
 import { allSubjects } from './data';
-import { useUser, useFirestore, useDoc } from '@/firebase';
-import { errorEmitter } from '@/firebase/error-emitter';
-import { FirestorePermissionError } from '@/firebase/errors';
 
 export type QuestionProgressStatus = 'in_progress' | 'completed';
 
@@ -33,54 +29,52 @@ const getInitialProgress = (): AllQuestionProgress => {
     return initialProgress;
 };
 
+const QUESTIONS_STORAGE_KEY = 'bancaTrackQuestionsProgress';
+
 export const useQuestionProgress = () => {
-    const { user, loading: userLoading } = useUser();
-    const db = useFirestore();
+    const [progress, setProgress] = useState<AllQuestionProgress | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    const progressRef = useMemo(() => {
-        if (!db || !user) return null;
-        return doc(db, `users/${user.uid}/questionsProgress`, 'main');
-    }, [db, user]);
+    useEffect(() => {
+        try {
+            const savedProgressRaw = localStorage.getItem(QUESTIONS_STORAGE_KEY);
+            if (savedProgressRaw) {
+                const savedProgress = JSON.parse(savedProgressRaw);
+                const baseProgress = getInitialProgress();
+                const merged = { ...baseProgress, ...savedProgress };
 
-    const { data: progressData, loading: progressLoading } = useDoc<AllQuestionProgress>(progressRef);
-
-    const progress = useMemo(() => {
-        const baseProgress = getInitialProgress();
-        if (!progressData) {
-            return baseProgress;
-        }
-
-        const merged = { ...baseProgress, ...progressData };
-
-        allSubjects.forEach(id => {
-            if (!merged[id.id]) {
-                merged[id.id] = { 
-                    status: 'in_progress',
-                    semana: '',
-                    questionsDone: '',
-                    accuracy: '',
-                    observations: ''
-                };
+                 allSubjects.forEach(id => {
+                    if (!merged[id.id]) {
+                        merged[id.id] = { 
+                            status: 'in_progress',
+                            semana: '',
+                            questionsDone: '',
+                            accuracy: '',
+                            observations: ''
+                        };
+                    }
+                });
+                setProgress(merged);
+            } else {
+                setProgress(getInitialProgress());
             }
-        });
-        
-        return merged;
-    }, [progressData]);
+        } catch (error) {
+            console.error("Failed to load questions progress from localStorage", error);
+            setProgress(getInitialProgress());
+        } finally {
+            setLoading(false);
+        }
+    }, []);
 
-    const loading = userLoading || (!!user && progressLoading);
+    const updateQuestionProgress = useCallback((newProgress: AllQuestionProgress) => {
+        try {
+            const newProgressJSON = JSON.stringify(newProgress);
+            localStorage.setItem(QUESTIONS_STORAGE_KEY, newProgressJSON);
+            setProgress(newProgress);
+        } catch (error) {
+            console.error("Failed to save questions progress to localStorage", error);
+        }
+    }, []);
 
-    const updateQuestionProgress = (newProgress: AllQuestionProgress) => {
-        if (!progressRef) return;
-        setDoc(progressRef, newProgress).catch(serverError => {
-            const permissionError = new FirestorePermissionError({
-                path: progressRef.path,
-                operation: 'write',
-                requestResourceData: newProgress,
-            });
-            errorEmitter.emit('permission-error', permissionError);
-        });
-    }
-
-    return { progress, loading, updateQuestionProgress, user };
+    return { progress, loading, updateQuestionProgress };
 };
-

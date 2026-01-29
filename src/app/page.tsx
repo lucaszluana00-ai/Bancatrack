@@ -1,7 +1,5 @@
 "use client";
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import OverallProgress from '@/components/dashboard/OverallProgress';
 import InProgressSubjects from '@/components/dashboard/InProgressSubjects';
 import { useUserProgress } from '@/lib/progress';
@@ -9,16 +7,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { allSubjects } from '@/lib/data';
 
 export default function Home() {
-  const { progress, loading, user } = useUserProgress();
-  const router = useRouter();
+  const { progress, loading } = useUserProgress();
 
-  useEffect(() => {
-    if (!loading && !user) {
-        router.push('/login');
-    }
-  }, [user, loading, router]);
-
-  if (loading || !user) {
+  if (loading || !progress) {
     return (
       <div className="container mx-auto py-8 px-4 sm:px-6 lg:px-8">
         <div className="space-y-8">
@@ -48,4 +39,3 @@ export default function Home() {
     </div>
   );
 }
-
